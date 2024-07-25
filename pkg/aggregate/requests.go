@@ -58,6 +58,9 @@ type SingleSizedRequests struct {
 	// 99% request time.
 	Dur99Millis int `json:"dur_99_millis"`
 
+	// 99% request time.
+	Dur999Millis int `json:"dur_999_millis"`
+
 	// 90% request time.
 	Dur90Millis int `json:"dur_90_millis"`
 
@@ -84,6 +87,7 @@ func (a *SingleSizedRequests) fill(ops bench.Operations) {
 	a.DurMedianMillis = durToMillis(ops.Median(0.5).Duration())
 	a.Dur90Millis = durToMillis(ops.Median(0.9).Duration())
 	a.Dur99Millis = durToMillis(ops.Median(0.99).Duration())
+	a.Dur999Millis = durToMillis(ops.Median(0.999).Duration())
 	a.SlowestMillis = durToMillis(ops.Median(1).Duration())
 	a.FastestMillis = durToMillis(ops.Median(0).Duration())
 	a.FirstByte = TtfbFromBench(ops.TTFB(start, end))
