@@ -31,6 +31,11 @@ var putFlags = []cli.Flag{
 		Usage: "Size of each generated object. Can be a number or 10KiB/MiB/GiB. All sizes are base 2 binary.",
 	},
 	cli.StringFlag{
+		Name:  "obj.distribsize",
+		Value: "",
+		Usage: "Size of each generated object. Can be a number or 10KiB/MiB/GiB. All sizes are base 2 binary.",
+	},
+	cli.StringFlag{
 		Name:   "part.size",
 		Value:  "",
 		Usage:  "Multipart part size. Can be a number or 10KiB/MiB/GiB. All sizes are base 2 binary.",

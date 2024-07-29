@@ -84,6 +84,7 @@ func newGenSource(ctx *cli.Context, sizeField string) func() generator.Source {
 		generator.WithPrefixSize(prefixSize),
 	}
 	tokens := strings.Split(ctx.String(sizeField), ",")
+
 	switch len(tokens) {
 	case 1:
 		size, err := toSize(tokens[0])
@@ -104,7 +105,10 @@ func newGenSource(ctx *cli.Context, sizeField string) func() generator.Source {
 	default:
 		fatalIf(probe.NewError(fmt.Errorf("unexpected obj.size specified: %s", ctx.String(sizeField))), "Invalid obj.size parameter")
 	}
-	opts = append([]generator.Option{g.Apply()}, append(opts, generator.WithRandomSize(ctx.Bool("obj.randsize")))...)
+	opts = append([]generator.Option{g.Apply()},
+		append(opts, generator.WithRandomSize(ctx.Bool("obj.randsize")))...)
+	opts = append(opts,
+		append(opts, generator.WithDistributionSize(ctx.String("obj.distribsize")))...)
 	src, err := generator.NewFn(opts...)
 	fatalIf(probe.NewError(err), "Unable to create data generator")
 	return src

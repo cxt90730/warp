@@ -39,6 +39,11 @@ var getFlags = []cli.Flag{
 		Usage: "Number of objects to upload.",
 	},
 	cli.StringFlag{
+		Name:  "obj.distribsize",
+		Value: "",
+		Usage: "Size of each generated object. Can be a number or 10KiB/MiB/GiB. All sizes are base 2 binary.",
+	},
+	cli.StringFlag{
 		Name:  "obj.size",
 		Value: "10MiB",
 		Usage: "Size of each generated object. Can be a number or 10KiB/MiB/GiB. All sizes are base 2 binary.",

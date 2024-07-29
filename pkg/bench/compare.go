@@ -63,6 +63,7 @@ func (c *CmpReqs) Compare(before, after Operations) {
 		P75:     a.P75 - b.P75,
 		P90:     a.P90 - b.P90,
 		P99:     a.P99 - b.P99,
+		P999:    a.P999 - b.P999,
 		StdDev:  a.StdDev - b.StdDev,
 	}
 }
@@ -77,6 +78,7 @@ type CmpRequests struct {
 	P75        time.Duration
 	P90        time.Duration
 	P99        time.Duration
+	P999       time.Duration
 	Worst      time.Duration
 	StdDev     time.Duration
 }
@@ -92,6 +94,7 @@ func (c *CmpRequests) fill(ops Operations) {
 	c.P75 = ops.Median(0.75).Duration()
 	c.P90 = ops.Median(0.9).Duration()
 	c.P99 = ops.Median(0.99).Duration()
+	c.P999 = ops.Median(0.999).Duration()
 	c.Worst = ops.Median(1).Duration()
 	c.StdDev = ops.StdDev()
 }
@@ -101,7 +104,7 @@ func (c *CmpReqs) String() string {
 	if c == nil {
 		return ""
 	}
-	return fmt.Sprintf("Avg: %s%v (%s%.f%%), P50: %s%v (%s%.f%%), P99: %s%v (%s%.f%%), Best: %s%v (%s%.f%%), Worst: %s%v (%s%.f%%) StdDev: %s%v (%s%.f%%)",
+	return fmt.Sprintf("Avg: %s%v (%s%.f%%), P50: %s%v (%s%.f%%), P99: %s%v (%s%.f%%), P999: %s%v (%s%.f%%), Best: %s%v (%s%.f%%), Worst: %s%v (%s%.f%%) StdDev: %s%v (%s%.f%%)",
 		plusPositiveD(c.Average),
 		c.Average.Round(time.Millisecond/20),
 		plusPositiveD(c.Average),
@@ -114,6 +117,10 @@ func (c *CmpReqs) String() string {
 		c.P99,
 		plusPositiveD(c.P99),
 		100*(float64(c.After.P99)-float64(c.Before.P99))/float64(c.Before.P99),
+		plusPositiveD(c.Best),
+		c.P999,
+		plusPositiveD(c.P999),
+		100*(float64(c.After.P999)-float64(c.Before.P999))/float64(c.Before.P999),
 		plusPositiveD(c.Best),
 		c.Best,
 		plusPositiveD(c.Best),
@@ -192,6 +199,7 @@ func (t TTFB) Compare(after TTFB) *TTFBCmp {
 			P75:     after.P75 - t.P75,
 			P90:     after.P90 - t.P90,
 			P99:     after.P99 - t.P99,
+			P999:    after.P999 - t.P999,
 			StdDev:  after.StdDev - t.StdDev,
 		},
 		Before: t,
@@ -204,7 +212,7 @@ func (t *TTFBCmp) String() string {
 	if t == nil {
 		return ""
 	}
-	return fmt.Sprintf("Avg: %s%v (%s%.f%%), P50: %s%v (%s%.f%%), P99: %s%v (%s%.f%%), Best: %s%v (%s%.f%%), Worst: %s%v (%s%.f%%) StdDev: %s%v (%s%.f%%)",
+	return fmt.Sprintf("Avg: %s%v (%s%.f%%), P50: %s%v (%s%.f%%), P99: %s%v (%s%.f%%), P999: %s%v (%s%.f%%), Best: %s%v (%s%.f%%), Worst: %s%v (%s%.f%%) StdDev: %s%v (%s%.f%%)",
 		plusPositiveD(t.Average),
 		t.Average.Round(time.Millisecond/20),
 		plusPositiveD(t.Average),
@@ -217,6 +225,10 @@ func (t *TTFBCmp) String() string {
 		t.P99,
 		plusPositiveD(t.P99),
 		100*(float64(t.After.P99)-float64(t.Before.P99))/float64(t.Before.P99),
+		plusPositiveD(t.P999),
+		t.P999,
+		plusPositiveD(t.P999),
+		100*(float64(t.After.P999)-float64(t.Before.P999))/float64(t.Before.P999),
 		plusPositiveD(t.Best),
 		t.Best,
 		plusPositiveD(t.Best),

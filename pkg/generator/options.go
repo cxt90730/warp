@@ -19,20 +19,25 @@ package generator
 
 import (
 	"errors"
+	"github.com/dustin/go-humanize"
 	"math/rand"
+	"strconv"
+	"strings"
 )
 
 // Options provides options.
 // Use WithXXX functions to set them.
 type Options struct {
-	src          func(o Options) (Source, error)
-	customPrefix string
-	random       RandomOpts
-	csv          CsvOpts
-	minSize      int64
-	totalSize    int64
-	randomPrefix int
-	randSize     bool
+	src              func(o Options) (Source, error)
+	customPrefix     string
+	random           RandomOpts
+	csv              CsvOpts
+	minSize          int64
+	totalSize        int64
+	randomPrefix     int
+	randSize         bool
+	distributeSize   map[uint64]int64 // bytes -> proportion
+	distributeSizeV2 []DistributionSize
 }
 
 // OptionApplier allows to abstract generator options.
@@ -42,6 +47,16 @@ type OptionApplier interface {
 
 // getSize will return a size for an object.
 func (o Options) getSize(rng *rand.Rand) int64 {
+	if o.distributeSize != nil {
+		n := rng.Intn(100)
+		var counter int64
+		for _, v := range o.distributeSizeV2 {
+			if v.Proportion+counter > int64(n) {
+				return int64(v.Size)
+			}
+			counter += v.Proportion
+		}
+	}
 	if !o.randSize {
 		return o.totalSize
 	}
@@ -127,4 +142,60 @@ func WithPrefixSize(n int) Option {
 		o.randomPrefix = n
 		return nil
 	}
+}
+
+func WithDistributionSize(d string) Option {
+	return func(o *Options) error {
+		ds := strings.Split(d, ",")
+		if len(ds) == 0 {
+			return errors.New("WithDistributionSize: invalid distribution size")
+		}
+		var counter int64
+		dMap := make(map[uint64]int64)
+		var err error
+		for _, s := range ds {
+			ss := strings.Split(s, ":")
+			if len(ss) != 2 {
+				return errors.New("WithDistributionSize: invalid distribution size")
+			}
+			var bs uint64
+			if bs, err = toSize(ss[0]); err != nil {
+				return err
+			}
+			proportion := ss[1]
+			n, err := strconv.Atoi(proportion)
+			if err != nil {
+				return err
+			}
+			if n < 0 {
+				return errors.New("WithDistributionSize: invalid distribution size")
+			}
+
+			dMap[bs] = int64(n)
+			counter += int64(n)
+			if counter > 100 {
+				return errors.New("WithDistributionSize: invalid distribution size, sum of proportion should be <= 100")
+			}
+		}
+		if counter < 100 {
+			dMap[2<<20] = dMap[2<<20] + 100 - counter
+		}
+		o.distributeSize = dMap
+		dList := make([]DistributionSize, len(dMap))
+		for k, v := range dMap {
+			dList = append(dList, DistributionSize{Size: k, Proportion: v})
+		}
+		o.distributeSizeV2 = dList
+		return nil
+	}
+}
+
+type DistributionSize struct {
+	Size       uint64
+	Proportion int64
+}
+
+// toSize converts a size indication to bytes.
+func toSize(size string) (uint64, error) {
+	return humanize.ParseBytes(size)
 }

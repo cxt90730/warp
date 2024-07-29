@@ -90,12 +90,21 @@ func newRandom(o Options) (Source, error) {
 	}
 	rng := rand.New(rndSrc)
 
-	size := o.random.size
-	if int64(size) > o.totalSize {
-		size = int(o.totalSize)
-	}
-	if size <= 0 {
-		return nil, fmt.Errorf("size must be >= 0, got %d", size)
+	var size int
+	if o.distributeSize != nil {
+		for k, _ := range o.distributeSize {
+			if k > uint64(size) {
+				size = int(k)
+			}
+		}
+	} else {
+		size = o.random.size
+		if int64(size) > o.totalSize {
+			size = int(o.totalSize)
+		}
+		if size <= 0 {
+			return nil, fmt.Errorf("size must be >= 0, got %d", size)
+		}
 	}
 
 	// Seed with random data.

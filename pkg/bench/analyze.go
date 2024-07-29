@@ -113,6 +113,7 @@ func (o Operations) TTFB(start, end time.Time) TTFB {
 		P75:     filtered.Median(0.75).TTFB(),
 		P90:     filtered.Median(0.9).TTFB(),
 		P99:     filtered.Median(0.99).TTFB(),
+		P999:    filtered.Median(0.999).TTFB(),
 		Worst:   filtered.Median(1).TTFB(),
 	}
 	for i := range res.Percentiles[:] {
