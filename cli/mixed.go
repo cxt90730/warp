@@ -38,6 +38,11 @@ var mixedFlags = []cli.Flag{
 		Value: "10MiB",
 		Usage: "Size of each generated object. Can be a number or 10KiB/MiB/GiB. All sizes are base 2 binary.",
 	},
+	cli.StringFlag{
+		Name:  "obj.distribsize",
+		Value: "",
+		Usage: "Size of each generated object. Can be a number or 10KiB/MiB/GiB. All sizes are base 2 binary.",
+	},
 	cli.Float64Flag{
 		Name:  "get-distrib",
 		Usage: "The amount of GET operations.",

@@ -141,6 +141,24 @@ type RequestSizeRange struct {
 	MaxSize int `json:"max_size"`
 	// Minimum size in request size range.
 	MinSize int `json:"min_size"`
+
+	// StdDev is the standard deviation of requests.
+	StdDev int `json:"std_dev_millis"`
+
+	// Median request duration.
+	DurMedianMillis int `json:"dur_median_millis"`
+
+	// 99% request time.
+	Dur99Millis int `json:"dur_99_millis"`
+
+	// 99% request time.
+	Dur999Millis int `json:"dur_999_millis"`
+
+	// 90% request time.
+	Dur90Millis int `json:"dur_90_millis"`
+
+	// Average request duration.
+	DurAvgMillis int `json:"dur_avg_millis"`
 }
 
 func (r *RequestSizeRange) fill(s bench.SizeSegment) {
@@ -157,6 +175,13 @@ func (r *RequestSizeRange) fill(s bench.SizeSegment) {
 	r.Bps99 = s.Ops.Median(0.99).BytesPerSec().Float()
 	r.BpsFastest = s.Ops.Median(0.0).BytesPerSec().Float()
 	r.BpsSlowest = s.Ops.Median(1).BytesPerSec().Float()
+	s.Ops.SortByDuration()
+	r.StdDev = durToMillis(s.Ops.StdDev())
+	r.DurAvgMillis = durToMillis(s.Ops.AvgDuration())
+	r.DurMedianMillis = durToMillis(s.Ops.Median(0.5).Duration())
+	r.Dur90Millis = durToMillis(s.Ops.Median(0.9).Duration())
+	r.Dur99Millis = durToMillis(s.Ops.Median(0.99).Duration())
+	r.Dur999Millis = durToMillis(s.Ops.Median(0.999).Duration())
 	for i := range r.BpsPct[:] {
 		r.BpsPct[i] = s.Ops.Median(float64(i) / 100).BytesPerSec().Float()
 	}
@@ -213,6 +238,7 @@ func (a *MultiSizedRequests) fill(ops bench.Operations) {
 			var r RequestSizeRange
 			r.fill(s)
 			r.fillFirst(s)
+
 			r.FirstByte = TtfbFromBench(s.Ops.TTFB(start, end))
 			// Store
 			a.BySize[i] = r

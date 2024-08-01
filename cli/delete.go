@@ -34,6 +34,11 @@ var deleteFlags = []cli.Flag{
 		Value: "1KiB",
 		Usage: "Size of each generated object. Can be a number or 10KiB/MiB/GiB. All sizes are base 2 binary.",
 	},
+	cli.StringFlag{
+		Name:  "obj.distribsize",
+		Value: "",
+		Usage: "Size of each generated object. Can be a number or 10KiB/MiB/GiB. All sizes are base 2 binary.",
+	},
 	cli.IntFlag{
 		Name:  "batch",
 		Value: 100,

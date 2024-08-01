@@ -7,6 +7,7 @@ require (
 	github.com/cheggaaa/pb v1.0.29
 	github.com/dustin/go-humanize v1.0.1
 	github.com/fatih/color v1.17.0
+	github.com/go-echarts/go-echarts/v2 v2.4.1
 	github.com/influxdata/influxdb-client-go/v2 v2.13.0
 	github.com/klauspost/compress v1.17.8
 	github.com/minio/cli v1.24.2

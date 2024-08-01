@@ -84,7 +84,7 @@ type Options struct {
 func Aggregate(o bench.Operations, opts Options) Aggregated {
 	o.SortByStartTime()
 	types := o.OpTypes()
-	a := Aggregated{
+	agg := Aggregated{
 		Type:                  "single",
 		Mixed:                 false,
 		Operations:            nil,
@@ -96,8 +96,8 @@ func Aggregate(o bench.Operations, opts Options) Aggregated {
 
 	// Fill mixed only parts...
 	if isMixed {
-		a.Mixed = true
-		a.Type = "mixed"
+		agg.Mixed = true
+		agg.Type = "mixed"
 		var ops bench.Operations
 		errs := o.FilterErrors()
 		if len(errs) == 0 {
@@ -116,8 +116,8 @@ func Aggregate(o bench.Operations, opts Options) Aggregated {
 
 		total := ops.Total(false)
 		total.Errors = len(errs)
-		a.MixedServerStats = &Throughput{}
-		a.MixedServerStats.fill(total)
+		agg.MixedServerStats = &Throughput{}
+		agg.MixedServerStats.fill(total)
 
 		segmentDur := opts.DurFunc(total.Duration())
 		segs := ops.Segment(bench.SegmentOptions{
@@ -127,14 +127,14 @@ func Aggregate(o bench.Operations, opts Options) Aggregated {
 			MultiOp:        true,
 		})
 		if len(segs) > 1 {
-			a.MixedServerStats.Segmented = &ThroughputSegmented{
+			agg.MixedServerStats.Segmented = &ThroughputSegmented{
 				SegmentDurationMillis: durToMillis(segmentDur),
 			}
-			a.MixedServerStats.Segmented.fill(segs, total)
+			agg.MixedServerStats.Segmented.fill(segs, total)
 		}
 
 		eps := o.SortSplitByEndpoint()
-		a.MixedThroughputByHost = make(map[string]Throughput, len(eps))
+		agg.MixedThroughputByHost = make(map[string]Throughput, len(eps))
 		var wg sync.WaitGroup
 		var mu sync.Mutex
 		wg.Add(len(eps))
@@ -148,7 +148,7 @@ func Aggregate(o bench.Operations, opts Options) Aggregated {
 					t.Errors = len(errs)
 				}
 				mu.Lock()
-				a.MixedThroughputByHost[ep] = t
+				agg.MixedThroughputByHost[ep] = t
 				mu.Unlock()
 			}(ep, ops)
 		}
@@ -164,7 +164,7 @@ func Aggregate(o bench.Operations, opts Options) Aggregated {
 		go func(i int) {
 			typ := types[i]
 			a := Operation{}
-			// Save a and mark as done.
+			// Save agg and mark as done.
 			defer func() {
 				res[i] = a
 				wg.Done()
@@ -269,6 +269,6 @@ func Aggregate(o bench.Operations, opts Options) Aggregated {
 		}(i)
 	}
 	wg.Wait()
-	a.Operations = res
-	return a
+	agg.Operations = res
+	return agg
 }

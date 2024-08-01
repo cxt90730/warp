@@ -22,9 +22,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +38,10 @@ import (
 	"github.com/minio/warp/api"
 	"github.com/minio/warp/pkg/aggregate"
 	"github.com/minio/warp/pkg/bench"
+
+	"github.com/go-echarts/go-echarts/v2/charts"
+	"github.com/go-echarts/go-echarts/v2/opts"
+	"github.com/go-echarts/go-echarts/v2/types"
 )
 
 var analyzeFlags = []cli.Flag{
@@ -43,6 +49,15 @@ var analyzeFlags = []cli.Flag{
 		Name:  "analyze.dur",
 		Value: "",
 		Usage: "Split analysis into durations of this length. Can be '1s', '5s', '1m', etc.",
+	},
+	cli.StringFlag{
+		Name:  "analyze.interval",
+		Value: "",
+		Usage: "Split analysis into intervals of this length. Can be '1s', '5s', '1m', etc.",
+	},
+	cli.BoolFlag{
+		Name:  "analyze.chart",
+		Usage: "Draw a chart of the analysis.",
 	},
 	cli.StringFlag{
 		Name:  "analyze.out",
@@ -178,7 +193,7 @@ func printMixedOpAnalysis(ctx *cli.Context, aggr aggregate.Aggregated, details b
 		console.SetColor("Print", color.New(color.FgWhite))
 
 		if ops.Skipped {
-			console.Println("Skipping", ops.Type, "too few samples. Longer benchmark run required for reliable results.")
+			console.Println("Skipping3", ops.Type, "too few samples. Longer benchmark run required for reliable results.")
 			continue
 		}
 
@@ -273,6 +288,175 @@ func printAnalysis(ctx *cli.Context, o bench.Operations) {
 		}
 		return analysisDur(ctx, total)
 	}
+
+	var aggrs []aggregate.Aggregated
+	interval := ctx.String("analyze.interval")
+	if interval != "" {
+		if len(o) == 0 {
+			console.Fatalln("No operations found")
+			return
+		}
+		iTime, err := time.ParseDuration(interval)
+		if err != nil {
+			console.Fatalln("Invalid interval:", err)
+			return
+		}
+		start := o[0].Start
+		startIndex, endIndex := 0, 0
+		for _, op := range o {
+			if op.Start.Before(start.Add(iTime)) {
+				endIndex++
+				continue
+			}
+			oo := o[startIndex:endIndex]
+			aggrs = append(aggrs, printAggregation(ctx, oo, prefiltered, durFn, wrSegs, details))
+			startIndex = endIndex
+			start = start.Add(iTime)
+		}
+		aggrs = append(aggrs, printAggregation(ctx, o[startIndex:], prefiltered, durFn, wrSegs, details))
+		if drawLine := ctx.Bool("analyze.chart"); drawLine {
+			// TODO: draw chart
+			http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				lines := DrawLineCharts(aggrs)
+				for _, line := range lines {
+					line.Render(w)
+				}
+			})
+			http.ListenAndServe(":8081", nil)
+		}
+	} else {
+		printAggregation(ctx, o, prefiltered, durFn, wrSegs, details)
+	}
+}
+
+func DrawLineCharts(aggrs []aggregate.Aggregated) []*charts.Line {
+	var lines []*charts.Line
+	// create a Avg line instance
+	RequestDelayAvgLineDataSeries := []LineDataSeries{
+		{
+			Name: "requests_avg_time(ms)",
+		},
+	}
+	RequestDelay90LineDataSeries := []LineDataSeries{
+		{
+			Name: "requests_90_time(ms)",
+		},
+	}
+	RequestDelay99LineDataSeries := []LineDataSeries{
+		{
+			Name: "requests_99_time(ms)",
+		},
+	}
+	RequestDelay999LineDataSeries := []LineDataSeries{
+		{
+			Name: "requests_999_time(ms)",
+		},
+	}
+	RequestDelayStdDevLineDataSeries := []LineDataSeries{
+		{
+			Name: "requests_std_dev_time(ms)",
+		},
+	}
+	RequestDelayMaxLineDataSeries := []LineDataSeries{
+		{
+			Name: "requests_max_time(ms)",
+		},
+	}
+	RequestDelayMinLineDataSeries := []LineDataSeries{
+		{
+			Name: "requests_min_time(ms)",
+		},
+	}
+	RequestTTFB999LineDataSeries := []LineDataSeries{
+		{
+			Name: "requests_ttfb999_time(ms)",
+		},
+	}
+	ThroughputAvgLineDataSeries := []LineDataSeries{
+		{
+			Name: "throughput average(MiB/s)",
+		},
+	}
+
+	RequestSuccessLineDataSeries := []LineDataSeries{
+		{
+			Name: "requests_completed",
+		},
+		{
+			Name: "requests_success",
+		},
+		{
+			Name: "requests_failed",
+		},
+	}
+
+	for _, aggr := range aggrs {
+		for _, o := range aggr.Operations {
+			if o.SingleSizedRequests != nil {
+				reqs := *o.SingleSizedRequests
+				RequestDelayAvgLineDataSeries[0].Data = append(RequestDelayAvgLineDataSeries[0].Data, opts.LineData{Value: reqs.DurAvgMillis})
+				RequestDelay90LineDataSeries[0].Data = append(RequestDelay90LineDataSeries[0].Data, opts.LineData{Value: reqs.Dur90Millis})
+				RequestDelay99LineDataSeries[0].Data = append(RequestDelay99LineDataSeries[0].Data, opts.LineData{Value: reqs.Dur99Millis})
+				RequestDelay999LineDataSeries[0].Data = append(RequestDelay999LineDataSeries[0].Data, opts.LineData{Value: reqs.Dur999Millis})
+				RequestDelayStdDevLineDataSeries[0].Data = append(RequestDelayStdDevLineDataSeries[0].Data, opts.LineData{Value: reqs.StdDev})
+				RequestDelayMaxLineDataSeries[0].Data = append(RequestDelayMaxLineDataSeries[0].Data, opts.LineData{Value: reqs.SlowestMillis})
+				RequestDelayMinLineDataSeries[0].Data = append(RequestDelayMinLineDataSeries[0].Data, opts.LineData{Value: reqs.FastestMillis})
+				if reqs.FirstByte != nil {
+					RequestTTFB999LineDataSeries[0].Data = append(RequestTTFB999LineDataSeries[0].Data, opts.LineData{Value: reqs.FirstByte.P999Millis})
+				}
+				ThroughputAvgLineDataSeries[0].Data = append(ThroughputAvgLineDataSeries[0].Data, opts.LineData{Value: o.Throughput.AverageBPS / (1 << 20)})
+				RequestSuccessLineDataSeries[0].Data = append(RequestSuccessLineDataSeries[0].Data, opts.LineData{Value: o.N})
+				RequestSuccessLineDataSeries[1].Data = append(RequestSuccessLineDataSeries[1].Data, opts.LineData{Value: o.N - o.Errors})
+				RequestSuccessLineDataSeries[2].Data = append(RequestSuccessLineDataSeries[2].Data, opts.LineData{Value: o.Errors})
+				RequestSuccessLineDataSeries[2].Opts = append(RequestSuccessLineDataSeries[2].Opts, charts.WithLineStyleOpts(opts.LineStyle{Color: "red"}))
+			}
+		}
+	}
+	lines = append(lines, drawLineChart("Requests Avg", "Requests Avg", RequestDelayAvgLineDataSeries))
+	lines = append(lines, drawLineChart("Requests 90", "Requests 90", RequestDelay90LineDataSeries))
+	lines = append(lines, drawLineChart("Requests 99", "Requests 99", RequestDelay99LineDataSeries))
+	lines = append(lines, drawLineChart("Requests 999", "Requests 999", RequestDelay999LineDataSeries))
+	lines = append(lines, drawLineChart("Requests StdDev", "Requests StdDev", RequestDelayStdDevLineDataSeries))
+	lines = append(lines, drawLineChart("Requests Max", "Requests Max", RequestDelayMaxLineDataSeries))
+	lines = append(lines, drawLineChart("Requests Min", "Requests Min", RequestDelayMinLineDataSeries))
+	lines = append(lines, drawLineChart("Requests TTFB 999", "Requests TTFB 999", RequestTTFB999LineDataSeries))
+	lines = append(lines, drawLineChart("Throughput Avg", "Throughput Avg", ThroughputAvgLineDataSeries))
+	lines = append(lines, drawLineChart("Requests Success", "Requests Success", RequestSuccessLineDataSeries))
+	return lines
+}
+
+func drawLineChart(title, subtitle string, dataSeries []LineDataSeries) *charts.Line {
+	// create a new line instance
+	line := charts.NewLine()
+	// set some global options like Title/Legend/ToolTip or anything else
+	line.SetGlobalOptions(
+		charts.WithInitializationOpts(opts.Initialization{Theme: types.ThemeRoma}),
+		charts.WithTitleOpts(opts.Title{
+			Title:    title,
+			Subtitle: subtitle,
+		}))
+
+	// Put data into instance
+	var x []string
+	for i := 0; i < len(dataSeries[0].Data); i++ {
+		x = append(x, strconv.Itoa(i))
+	}
+
+	line = line.SetXAxis(x)
+	for _, series := range dataSeries {
+		line = line.AddSeries(series.Name, series.Data, series.Opts...)
+	}
+	line.SetSeriesOptions(charts.WithLineChartOpts(opts.LineChart{Smooth: opts.Bool(false)}))
+	return line
+}
+
+type LineDataSeries struct {
+	Name string
+	Data []opts.LineData
+	Opts []charts.SeriesOpts
+}
+
+func printAggregation(ctx *cli.Context, o bench.Operations, prefiltered bool, durFn func(time.Duration) time.Duration, wrSegs io.Writer, details bool) aggregate.Aggregated {
 	aggr := aggregate.Aggregate(o, aggregate.Options{
 		Prefiltered: prefiltered,
 		DurFunc:     durFn,
@@ -291,16 +475,22 @@ func printAnalysis(ctx *cli.Context, o bench.Operations) {
 			console.Errorln(err)
 		}
 		os.Stdout.Write(b)
-		return
+		return aggr
 	}
 
 	if aggr.Mixed {
 		printMixedOpAnalysis(ctx, aggr, details)
-		return
+		return aggr
 	}
 
 	for _, ops := range aggr.Operations {
 		typ := ops.Type
+		console.SetColor("Print", color.New(color.FgHiWhite))
+		interval := ctx.String("analyze.interval")
+		if interval != "" {
+			console.Printf("\n----------------------------------------")
+			console.Printf("\nStart Time: %v", o[0].Start)
+		}
 		console.Println("\n----------------------------------------")
 
 		opo := ops.ObjectsPerOperation
@@ -345,7 +535,7 @@ func printAnalysis(ctx *cli.Context, o bench.Operations) {
 
 		if ops.Skipped {
 			console.SetColor("Print", color.New(color.FgHiWhite))
-			console.Println("Skipping", typ, "too few samples. Longer benchmark run required for reliable results.")
+			console.Println("Skipping2", typ, "too few samples. Longer benchmark run required for reliable results.")
 			continue
 		}
 
@@ -378,7 +568,7 @@ func printAnalysis(ctx *cli.Context, o bench.Operations) {
 					seg := ops.Segmented
 					console.SetColor("Print", color.New(color.FgWhite))
 					if seg == nil || len(seg.Segments) <= 1 {
-						console.Println("Skipping", typ, "host:", ep, " - Too few samples. Longer benchmark run needed for reliable results.")
+						console.Println("Skipping1", typ, "host:", ep, " - Too few samples. Longer benchmark run needed for reliable results.")
 						continue
 					}
 					console.SetColor("Print", color.New(color.FgWhite))
@@ -398,6 +588,7 @@ func printAnalysis(ctx *cli.Context, o bench.Operations) {
 		console.Println(" * 50% Median:", aggregate.SegmentSmall{BPS: segs.MedianBPS, OPS: segs.MedianOPS, Start: segs.MedianStart}.StringLong(dur, details))
 		console.Println(" * Slowest:", aggregate.SegmentSmall{BPS: segs.SlowestBPS, OPS: segs.SlowestOPS, Start: segs.SlowestStart}.StringLong(dur, details))
 	}
+	return aggr
 }
 
 func writeSegs(ctx *cli.Context, wrSegs io.Writer, ops bench.Operations, allThreads, details bool) {
@@ -558,6 +749,23 @@ func printRequestAnalysis(_ *cli.Context, ops aggregate.Operation, details bool)
 		console.SetColor("Print", color.New(color.FgHiWhite))
 		console.Print("\nRequest size ", s.MinSizeString, " -> ", s.MaxSizeString, ". Requests - ", s.Requests, ":\n")
 		console.SetColor("Print", color.New(color.FgWhite))
+
+		console.Print("\nRequests considered: ", reqs.Requests, ":\n")
+		console.SetColor("Print", color.New(color.FgWhite))
+
+		if reqs.Skipped {
+			console.Println("Not enough requests")
+			return
+		}
+
+		console.Print(
+			" * Avg: ", time.Duration(s.DurAvgMillis)*time.Millisecond,
+			", 50%: ", time.Duration(s.DurMedianMillis)*time.Millisecond,
+			", 90%: ", time.Duration(s.Dur90Millis)*time.Millisecond,
+			", 99%: ", time.Duration(s.Dur99Millis)*time.Millisecond,
+			", 999%: ", time.Duration(s.Dur999Millis)*time.Millisecond,
+			", StdDev: ", time.Duration(s.StdDev)*time.Millisecond,
+			"\n")
 
 		console.Print(""+
 			" * Throughput: Average: ", bench.Throughput(s.BpsAverage),
