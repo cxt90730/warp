@@ -318,8 +318,16 @@ func printAnalysis(ctx *cli.Context, o bench.Operations) {
 			// TODO: draw chart
 			http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 				lines := DrawLineCharts(aggrs)
+				if lines == nil {
+					w.Header().Set("Content-Type", "text/html")
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte("<html><head><title>No data to analysis</title></head><body>"))
+					return
+				}
 				for _, line := range lines {
-					line.Render(w)
+					if line != nil && len(line.MultiSeries) != 0 {
+						line.Render(w)
+					}
 				}
 			})
 			http.ListenAndServe(":8081", nil)
@@ -332,64 +340,81 @@ func printAnalysis(ctx *cli.Context, o bench.Operations) {
 func DrawLineCharts(aggrs []aggregate.Aggregated) []*charts.Line {
 	var lines []*charts.Line
 	// create a Avg line instance
-	RequestDelayAvgLineDataSeries := []LineDataSeries{
-		{
-			Name: "requests_avg_time(ms)",
-		},
-	}
-	RequestDelay90LineDataSeries := []LineDataSeries{
-		{
-			Name: "requests_90_time(ms)",
-		},
-	}
-	RequestDelay99LineDataSeries := []LineDataSeries{
-		{
-			Name: "requests_99_time(ms)",
-		},
-	}
-	RequestDelay999LineDataSeries := []LineDataSeries{
-		{
-			Name: "requests_999_time(ms)",
-		},
-	}
-	RequestDelayStdDevLineDataSeries := []LineDataSeries{
-		{
-			Name: "requests_std_dev_time(ms)",
-		},
-	}
-	RequestDelayMaxLineDataSeries := []LineDataSeries{
-		{
-			Name: "requests_max_time(ms)",
-		},
-	}
-	RequestDelayMinLineDataSeries := []LineDataSeries{
-		{
-			Name: "requests_min_time(ms)",
-		},
-	}
-	RequestTTFB999LineDataSeries := []LineDataSeries{
-		{
-			Name: "requests_ttfb999_time(ms)",
-		},
-	}
-	ThroughputAvgLineDataSeries := []LineDataSeries{
-		{
-			Name: "throughput average(MiB/s)",
-		},
-	}
+	var RequestDelayAvgLineDataSeries []LineDataSeries
+	var RequestDelay90LineDataSeries []LineDataSeries
+	var RequestDelay99LineDataSeries []LineDataSeries
+	var RequestDelay999LineDataSeries []LineDataSeries
+	var RequestDelayStdDevLineDataSeries []LineDataSeries
+	var RequestDelayMaxLineDataSeries []LineDataSeries
+	var RequestDelayMinLineDataSeries []LineDataSeries
+	var RequestTTFB999LineDataSeries []LineDataSeries
+	var ThroughputAvgLineDataSeries []LineDataSeries
+	var RequestSuccessLineDataSeries []LineDataSeries
 
-	RequestSuccessLineDataSeries := []LineDataSeries{
-		{
-			Name: "requests_completed",
-		},
-		{
-			Name: "requests_success",
-		},
-		{
-			Name: "requests_failed",
-		},
-	}
+	var ThroughputTotalLineDataSeries []LineDataSeries
+	var RequestTotalLineDataSeries []LineDataSeries
+	var RequestRangeLineDataSeries []LineDataSeries
 
+	if len(aggrs) == 0 {
+		fmt.Println("No data to analysis1")
+
+		return nil
+	}
+	if aggrs[0].Operations == nil {
+		fmt.Println("No data to analysis2")
+
+		return nil
+	}
+	if aggrs[0].Operations[0].SingleSizedRequests != nil {
+		RequestDelayAvgLineDataSeries = append(RequestDelayAvgLineDataSeries, LineDataSeries{Name: "requests_avg_time(ms)"})
+		RequestDelay90LineDataSeries = append(RequestDelay90LineDataSeries, LineDataSeries{Name: "requests_90_time(ms)"})
+		RequestDelay99LineDataSeries = append(RequestDelay99LineDataSeries, LineDataSeries{Name: "requests_99_time(ms)"})
+		RequestDelay999LineDataSeries = append(RequestDelay999LineDataSeries, LineDataSeries{Name: "requests_999_time(ms)"})
+		RequestDelayStdDevLineDataSeries = append(RequestDelayStdDevLineDataSeries, LineDataSeries{Name: "requests_std_dev_time(ms)"})
+		RequestDelayMaxLineDataSeries = append(RequestDelayMaxLineDataSeries, LineDataSeries{Name: "requests_max_time(ms)"})
+		RequestDelayMinLineDataSeries = append(RequestDelayMinLineDataSeries, LineDataSeries{Name: "requests_min_time(ms)"})
+		if aggrs[0].Operations[0].SingleSizedRequests.FirstByte != nil {
+			RequestTTFB999LineDataSeries = append(RequestTTFB999LineDataSeries, LineDataSeries{Name: "requests_ttfb999_time(ms)"})
+		}
+		ThroughputAvgLineDataSeries = append(ThroughputAvgLineDataSeries, LineDataSeries{Name: "throughput average(MiB/s)"})
+		ThroughputTotalLineDataSeries = append(ThroughputTotalLineDataSeries, LineDataSeries{Name: "throughput total(MiB/s)"})
+		RequestTotalLineDataSeries = append(RequestTotalLineDataSeries, LineDataSeries{Name: "ops total"})
+		RequestSuccessLineDataSeries = append(RequestSuccessLineDataSeries,
+			LineDataSeries{Name: "requests_completed"}, LineDataSeries{Name: "requests_success"}, LineDataSeries{Name: "requests_failed"})
+	} else {
+		var fbo *aggregate.MultiSizedRequests
+		for i := range aggrs {
+			for j := range aggrs[i].Operations {
+				if aggrs[i].Operations[j].MultiSizedRequests != nil {
+					for k := range aggrs[i].Operations[j].MultiSizedRequests.BySize {
+						if aggrs[i].Operations[j].MultiSizedRequests.BySize[k].FirstByte != nil {
+							fbo = aggrs[i].Operations[j].MultiSizedRequests
+						}
+					}
+				}
+			}
+		}
+		if fbo == nil {
+			fbo = aggrs[0].Operations[0].MultiSizedRequests
+		}
+		for i, s := range fbo.BySize {
+			RequestDelayAvgLineDataSeries = append(RequestDelayAvgLineDataSeries, LineDataSeries{Name: fmt.Sprintf("%s-%s", s.MinSizeString, s.MaxSizeString)})
+			RequestDelay90LineDataSeries = append(RequestDelay90LineDataSeries, LineDataSeries{Name: fmt.Sprintf("%s-%s", s.MinSizeString, s.MaxSizeString)})
+			RequestDelay99LineDataSeries = append(RequestDelay99LineDataSeries, LineDataSeries{Name: fmt.Sprintf("%s-%s", s.MinSizeString, s.MaxSizeString)})
+			RequestDelay999LineDataSeries = append(RequestDelay999LineDataSeries, LineDataSeries{Name: fmt.Sprintf("%s-%s", s.MinSizeString, s.MaxSizeString)})
+			RequestDelayStdDevLineDataSeries = append(RequestDelayStdDevLineDataSeries, LineDataSeries{Name: fmt.Sprintf("%s-%s", s.MinSizeString, s.MaxSizeString)})
+			if fbo.BySize[i].FirstByte != nil {
+				RequestTTFB999LineDataSeries = append(RequestTTFB999LineDataSeries, LineDataSeries{Name: fmt.Sprintf("%s-%s", s.MinSizeString, s.MaxSizeString)})
+			}
+			ThroughputAvgLineDataSeries = append(ThroughputAvgLineDataSeries, LineDataSeries{Name: fmt.Sprintf("%s-%s", s.MinSizeString, s.MaxSizeString)})
+			RequestRangeLineDataSeries = append(RequestRangeLineDataSeries, LineDataSeries{Name: fmt.Sprintf("%s-%s", s.MinSizeString, s.MaxSizeString)})
+		}
+		RequestSuccessLineDataSeries = append(RequestSuccessLineDataSeries,
+			LineDataSeries{Name: "requests_completed"}, LineDataSeries{Name: "requests_success"}, LineDataSeries{Name: "requests_failed"})
+
+		RequestTotalLineDataSeries = append(RequestTotalLineDataSeries, LineDataSeries{Name: "ops total"})
+		ThroughputTotalLineDataSeries = append(ThroughputTotalLineDataSeries, LineDataSeries{Name: "throughput total(MiB/s)"})
+	}
 	for _, aggr := range aggrs {
 		for _, o := range aggr.Operations {
 			if o.SingleSizedRequests != nil {
@@ -401,6 +426,7 @@ func DrawLineCharts(aggrs []aggregate.Aggregated) []*charts.Line {
 				RequestDelayStdDevLineDataSeries[0].Data = append(RequestDelayStdDevLineDataSeries[0].Data, opts.LineData{Value: reqs.StdDev})
 				RequestDelayMaxLineDataSeries[0].Data = append(RequestDelayMaxLineDataSeries[0].Data, opts.LineData{Value: reqs.SlowestMillis})
 				RequestDelayMinLineDataSeries[0].Data = append(RequestDelayMinLineDataSeries[0].Data, opts.LineData{Value: reqs.FastestMillis})
+
 				if reqs.FirstByte != nil {
 					RequestTTFB999LineDataSeries[0].Data = append(RequestTTFB999LineDataSeries[0].Data, opts.LineData{Value: reqs.FirstByte.P999Millis})
 				}
@@ -409,19 +435,51 @@ func DrawLineCharts(aggrs []aggregate.Aggregated) []*charts.Line {
 				RequestSuccessLineDataSeries[1].Data = append(RequestSuccessLineDataSeries[1].Data, opts.LineData{Value: o.N - o.Errors})
 				RequestSuccessLineDataSeries[2].Data = append(RequestSuccessLineDataSeries[2].Data, opts.LineData{Value: o.Errors})
 				RequestSuccessLineDataSeries[2].Opts = append(RequestSuccessLineDataSeries[2].Opts, charts.WithLineStyleOpts(opts.LineStyle{Color: "red"}))
+
+				RequestTotalLineDataSeries[0].Data = append(RequestTotalLineDataSeries[0].Data, opts.LineData{Value: o.N})
+				ThroughputTotalLineDataSeries[0].Data = append(ThroughputTotalLineDataSeries[0].Data, opts.LineData{Value: o.Throughput.AverageBPS / (1 << 20)})
+
+			} else {
+				reqs := *o.MultiSizedRequests
+				var NErrors = o.Errors
+				for i, s := range reqs.BySize {
+					RequestDelayAvgLineDataSeries[i].Data = append(RequestDelayAvgLineDataSeries[i].Data, opts.LineData{Value: s.DurAvgMillis})
+					RequestDelay90LineDataSeries[i].Data = append(RequestDelay90LineDataSeries[i].Data, opts.LineData{Value: s.Dur90Millis})
+					RequestDelay99LineDataSeries[i].Data = append(RequestDelay99LineDataSeries[i].Data, opts.LineData{Value: s.Dur99Millis})
+					RequestDelay999LineDataSeries[i].Data = append(RequestDelay999LineDataSeries[i].Data, opts.LineData{Value: s.Dur999Millis})
+					RequestDelayStdDevLineDataSeries[i].Data = append(RequestDelayStdDevLineDataSeries[i].Data, opts.LineData{Value: s.StdDev})
+					if s.FirstByte != nil {
+						RequestTTFB999LineDataSeries[i].Data = append(RequestTTFB999LineDataSeries[i].Data, opts.LineData{Value: s.FirstByte.P999Millis})
+						NErrors += s.FirstByte.OverSecond
+					}
+					ThroughputAvgLineDataSeries[i].Data = append(ThroughputAvgLineDataSeries[i].Data, opts.LineData{Value: s.BpsAverage / (1 << 20)})
+					RequestRangeLineDataSeries[i].Data = append(RequestRangeLineDataSeries[i].Data, opts.LineData{Value: s.Requests})
+				}
+				RequestSuccessLineDataSeries[0].Data = append(RequestSuccessLineDataSeries[0].Data, opts.LineData{Value: o.N})
+				RequestSuccessLineDataSeries[1].Data = append(RequestSuccessLineDataSeries[1].Data, opts.LineData{Value: o.N - NErrors})
+				RequestSuccessLineDataSeries[2].Data = append(RequestSuccessLineDataSeries[2].Data, opts.LineData{Value: NErrors})
+				RequestSuccessLineDataSeries[2].Opts = append(RequestSuccessLineDataSeries[2].Opts, charts.WithLineStyleOpts(opts.LineStyle{Color: "red"}))
+
+				RequestTotalLineDataSeries[0].Data = append(RequestTotalLineDataSeries[0].Data, opts.LineData{Value: o.N})
+				ThroughputTotalLineDataSeries[0].Data = append(ThroughputTotalLineDataSeries[0].Data, opts.LineData{Value: o.Throughput.AverageBPS / (1 << 20)})
 			}
+
 		}
 	}
-	lines = append(lines, drawLineChart("Requests Avg", "Requests Avg", RequestDelayAvgLineDataSeries))
-	lines = append(lines, drawLineChart("Requests 90", "Requests 90", RequestDelay90LineDataSeries))
-	lines = append(lines, drawLineChart("Requests 99", "Requests 99", RequestDelay99LineDataSeries))
-	lines = append(lines, drawLineChart("Requests 999", "Requests 999", RequestDelay999LineDataSeries))
-	lines = append(lines, drawLineChart("Requests StdDev", "Requests StdDev", RequestDelayStdDevLineDataSeries))
-	lines = append(lines, drawLineChart("Requests Max", "Requests Max", RequestDelayMaxLineDataSeries))
-	lines = append(lines, drawLineChart("Requests Min", "Requests Min", RequestDelayMinLineDataSeries))
-	lines = append(lines, drawLineChart("Requests TTFB 999", "Requests TTFB 999", RequestTTFB999LineDataSeries))
-	lines = append(lines, drawLineChart("Throughput Avg", "Throughput Avg", ThroughputAvgLineDataSeries))
+
+	lines = append(lines, drawLineChart("Requests Avg", "Requests Avg(ms)", RequestDelayAvgLineDataSeries))
+	lines = append(lines, drawLineChart("Requests 90", "Requests 90(ms)", RequestDelay90LineDataSeries))
+	lines = append(lines, drawLineChart("Requests 99", "Requests 99(ms)", RequestDelay99LineDataSeries))
+	lines = append(lines, drawLineChart("Requests 999", "Requests 999(ms)", RequestDelay999LineDataSeries))
+	lines = append(lines, drawLineChart("Requests StdDev", "Requests StdDev(ms)", RequestDelayStdDevLineDataSeries))
+	lines = append(lines, drawLineChart("Requests Max", "Requests Max(ms)", RequestDelayMaxLineDataSeries))
+	lines = append(lines, drawLineChart("Requests Min", "Requests Min(ms)", RequestDelayMinLineDataSeries))
+	lines = append(lines, drawLineChart("Requests TTFB 999", "Requests TTFB 999(ms)", RequestTTFB999LineDataSeries))
+	lines = append(lines, drawLineChart("Throughput Avg", "Throughput Avg(MiB/s)", ThroughputAvgLineDataSeries))
 	lines = append(lines, drawLineChart("Requests Success", "Requests Success", RequestSuccessLineDataSeries))
+	lines = append(lines, drawLineChart("Throughput Total", "Throughput Total(MiB/s)", ThroughputTotalLineDataSeries))
+	lines = append(lines, drawLineChart("Requests Total", "Requests Total", RequestTotalLineDataSeries))
+	lines = append(lines, drawLineChart("Requests Range", "Requests Range", RequestRangeLineDataSeries))
 	return lines
 }
 
@@ -437,16 +495,18 @@ func drawLineChart(title, subtitle string, dataSeries []LineDataSeries) *charts.
 		}))
 
 	// Put data into instance
-	var x []string
-	for i := 0; i < len(dataSeries[0].Data); i++ {
-		x = append(x, strconv.Itoa(i))
-	}
+	if len(dataSeries) != 0 {
+		var x []string
+		for i := 0; i < len(dataSeries[0].Data); i++ {
+			x = append(x, strconv.Itoa(i))
+		}
 
-	line = line.SetXAxis(x)
-	for _, series := range dataSeries {
-		line = line.AddSeries(series.Name, series.Data, series.Opts...)
+		line = line.SetXAxis(x)
+		for _, series := range dataSeries {
+			line = line.AddSeries(series.Name, series.Data, series.Opts...)
+		}
+		line.SetSeriesOptions(charts.WithLineChartOpts(opts.LineChart{Smooth: opts.Bool(false)}))
 	}
-	line.SetSeriesOptions(charts.WithLineChartOpts(opts.LineChart{Smooth: opts.Bool(false)}))
 	return line
 }
 
@@ -706,6 +766,19 @@ func printRequestAnalysis(_ *cli.Context, ops aggregate.Operation, details bool)
 			}
 		}
 
+		var oversecond int
+		if reqs.FirstByte != nil {
+			oversecond = reqs.FirstByte.OverSecond
+		}
+		console.SetColor("Print", color.New(color.FgHiWhite))
+		console.Println("\nRequest Summary:")
+		console.SetColor("Print", color.New(color.FgWhite))
+		console.Println(" * TotalRequests:", ops.N,
+			", Errors:", ops.Errors,
+			", Over second:", oversecond,
+			", SLA:", float64(ops.N-ops.Errors-oversecond)*100/float64(ops.N), "%",
+			"\n")
+
 		if eps := reqs.ByHost; len(eps) > 1 && details {
 			console.SetColor("Print", color.New(color.FgHiWhite))
 			console.Println("\nRequests by host:")
@@ -744,6 +817,7 @@ func printRequestAnalysis(_ *cli.Context, ops aggregate.Operation, details bool)
 	}
 
 	sizes := reqs.BySize
+	var oversecond int
 	for _, s := range sizes {
 
 		console.SetColor("Print", color.New(color.FgHiWhite))
@@ -778,6 +852,7 @@ func printRequestAnalysis(_ *cli.Context, ops aggregate.Operation, details bool)
 
 		if s.FirstByte != nil {
 			console.Println(" * TTFB:", s.FirstByte)
+			oversecond += s.FirstByte.OverSecond
 		}
 
 		if s.FirstAccess != nil {
@@ -796,6 +871,15 @@ func printRequestAnalysis(_ *cli.Context, ops aggregate.Operation, details bool)
 		}
 
 	}
+
+	console.SetColor("Print", color.New(color.FgHiWhite))
+	console.Println("\nRequest Summary:")
+	console.SetColor("Print", color.New(color.FgWhite))
+	console.Println(" * TotalRequests:", ops.N,
+		", Errors:", ops.Errors,
+		", Over second:", oversecond,
+		", SLA:", float64(ops.N-ops.Errors-oversecond)*100/float64(ops.N), "%",
+		"\n")
 	if eps := reqs.ByHost; len(eps) > 1 && details {
 		console.SetColor("Print", color.New(color.FgHiWhite))
 		console.Println("\nRequests by host:")

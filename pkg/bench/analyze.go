@@ -64,6 +64,7 @@ type TTFB struct {
 	P999        time.Duration
 	Worst       time.Duration
 	StdDev      time.Duration
+	OverSecond  int
 	Percentiles [101]time.Duration `json:"percentiles_millis"`
 }
 
@@ -123,6 +124,9 @@ func (o Operations) TTFB(start, end time.Time) TTFB {
 	for _, op := range filtered {
 		ttfb := op.TTFB()
 		res.Average += ttfb
+		if ttfb.Seconds() > 1 {
+			res.OverSecond++
+		}
 	}
 	avg := float64(res.Average) / float64(len(filtered))
 	res.Average /= time.Duration(len(filtered))

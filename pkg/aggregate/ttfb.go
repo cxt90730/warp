@@ -37,6 +37,7 @@ type TTFB struct {
 	SlowestMillis     int      `json:"slowest_millis"`
 	StdDevMillis      int      `json:"std_dev_millis"`
 	PercentilesMillis [101]int `json:"percentiles_millis"`
+	OverSecond        int      `json:"over_second"`
 }
 
 // String returns a human printable version of the time to first byte.
@@ -73,6 +74,7 @@ func TtfbFromBench(t bench.TTFB) *TTFB {
 		P999Millis:    durToMillis(t.P999),
 		StdDevMillis:  durToMillis(t.StdDev),
 		FastestMillis: durToMillis(t.Best),
+		OverSecond:    t.OverSecond,
 	}
 	for i, v := range t.Percentiles[:] {
 		t2.PercentilesMillis[i] = durToMillis(v)
