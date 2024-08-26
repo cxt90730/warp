@@ -18,6 +18,7 @@
 package aggregate
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -159,6 +160,10 @@ type RequestSizeRange struct {
 
 	// Average request duration.
 	DurAvgMillis int `json:"dur_avg_millis"`
+}
+
+func (r *RequestSizeRange) Key() string {
+	return fmt.Sprintf("%d-%d", r.MinSize, r.MaxSize)
 }
 
 func (r *RequestSizeRange) fill(s bench.SizeSegment) {

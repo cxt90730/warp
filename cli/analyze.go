@@ -355,6 +355,8 @@ func DrawLineCharts(aggrs []aggregate.Aggregated) []*charts.Line {
 	var RequestTotalLineDataSeries []LineDataSeries
 	var RequestRangeLineDataSeries []LineDataSeries
 
+	var keyRange = make(map[string]struct{})
+
 	if len(aggrs) == 0 {
 		fmt.Println("No data to analysis1")
 
@@ -365,6 +367,7 @@ func DrawLineCharts(aggrs []aggregate.Aggregated) []*charts.Line {
 
 		return nil
 	}
+
 	if aggrs[0].Operations[0].SingleSizedRequests != nil {
 		RequestDelayAvgLineDataSeries = append(RequestDelayAvgLineDataSeries, LineDataSeries{Name: "requests_avg_time(ms)"})
 		RequestDelay90LineDataSeries = append(RequestDelay90LineDataSeries, LineDataSeries{Name: "requests_90_time(ms)"})
@@ -382,32 +385,28 @@ func DrawLineCharts(aggrs []aggregate.Aggregated) []*charts.Line {
 		RequestSuccessLineDataSeries = append(RequestSuccessLineDataSeries,
 			LineDataSeries{Name: "requests_completed"}, LineDataSeries{Name: "requests_success"}, LineDataSeries{Name: "requests_failed"})
 	} else {
-		var fbo *aggregate.MultiSizedRequests
 		for i := range aggrs {
 			for j := range aggrs[i].Operations {
 				if aggrs[i].Operations[j].MultiSizedRequests != nil {
 					for k := range aggrs[i].Operations[j].MultiSizedRequests.BySize {
 						if aggrs[i].Operations[j].MultiSizedRequests.BySize[k].FirstByte != nil {
-							fbo = aggrs[i].Operations[j].MultiSizedRequests
+							keyRange[aggrs[i].Operations[j].MultiSizedRequests.BySize[k].Key()] = struct{}{}
 						}
 					}
 				}
 			}
 		}
-		if fbo == nil {
-			fbo = aggrs[0].Operations[0].MultiSizedRequests
-		}
-		for i, s := range fbo.BySize {
-			RequestDelayAvgLineDataSeries = append(RequestDelayAvgLineDataSeries, LineDataSeries{Name: fmt.Sprintf("%s-%s", s.MinSizeString, s.MaxSizeString)})
-			RequestDelay90LineDataSeries = append(RequestDelay90LineDataSeries, LineDataSeries{Name: fmt.Sprintf("%s-%s", s.MinSizeString, s.MaxSizeString)})
-			RequestDelay99LineDataSeries = append(RequestDelay99LineDataSeries, LineDataSeries{Name: fmt.Sprintf("%s-%s", s.MinSizeString, s.MaxSizeString)})
-			RequestDelay999LineDataSeries = append(RequestDelay999LineDataSeries, LineDataSeries{Name: fmt.Sprintf("%s-%s", s.MinSizeString, s.MaxSizeString)})
-			RequestDelayStdDevLineDataSeries = append(RequestDelayStdDevLineDataSeries, LineDataSeries{Name: fmt.Sprintf("%s-%s", s.MinSizeString, s.MaxSizeString)})
-			if fbo.BySize[i].FirstByte != nil {
-				RequestTTFB999LineDataSeries = append(RequestTTFB999LineDataSeries, LineDataSeries{Name: fmt.Sprintf("%s-%s", s.MinSizeString, s.MaxSizeString)})
-			}
-			ThroughputAvgLineDataSeries = append(ThroughputAvgLineDataSeries, LineDataSeries{Name: fmt.Sprintf("%s-%s", s.MinSizeString, s.MaxSizeString)})
-			RequestRangeLineDataSeries = append(RequestRangeLineDataSeries, LineDataSeries{Name: fmt.Sprintf("%s-%s", s.MinSizeString, s.MaxSizeString)})
+
+		fmt.Println("len MultiSizedRequests by size", len(keyRange))
+		for k, _ := range keyRange {
+			RequestDelayAvgLineDataSeries = append(RequestDelayAvgLineDataSeries, LineDataSeries{Name: k})
+			RequestDelay90LineDataSeries = append(RequestDelay90LineDataSeries, LineDataSeries{Name: k})
+			RequestDelay99LineDataSeries = append(RequestDelay99LineDataSeries, LineDataSeries{Name: k})
+			RequestDelay999LineDataSeries = append(RequestDelay999LineDataSeries, LineDataSeries{Name: k})
+			RequestDelayStdDevLineDataSeries = append(RequestDelayStdDevLineDataSeries, LineDataSeries{Name: k})
+			RequestTTFB999LineDataSeries = append(RequestTTFB999LineDataSeries, LineDataSeries{Name: k})
+			ThroughputAvgLineDataSeries = append(ThroughputAvgLineDataSeries, LineDataSeries{Name: k})
+			RequestRangeLineDataSeries = append(RequestRangeLineDataSeries, LineDataSeries{Name: k})
 		}
 		RequestSuccessLineDataSeries = append(RequestSuccessLineDataSeries,
 			LineDataSeries{Name: "requests_completed"}, LineDataSeries{Name: "requests_success"}, LineDataSeries{Name: "requests_failed"})
@@ -440,20 +439,39 @@ func DrawLineCharts(aggrs []aggregate.Aggregated) []*charts.Line {
 				ThroughputTotalLineDataSeries[0].Data = append(ThroughputTotalLineDataSeries[0].Data, opts.LineData{Value: o.Throughput.AverageBPS / (1 << 20)})
 
 			} else {
+				if o.MultiSizedRequests == nil {
+					continue
+				}
 				reqs := *o.MultiSizedRequests
 				var NErrors = o.Errors
 				for i, s := range reqs.BySize {
-					RequestDelayAvgLineDataSeries[i].Data = append(RequestDelayAvgLineDataSeries[i].Data, opts.LineData{Value: s.DurAvgMillis})
-					RequestDelay90LineDataSeries[i].Data = append(RequestDelay90LineDataSeries[i].Data, opts.LineData{Value: s.Dur90Millis})
-					RequestDelay99LineDataSeries[i].Data = append(RequestDelay99LineDataSeries[i].Data, opts.LineData{Value: s.Dur99Millis})
-					RequestDelay999LineDataSeries[i].Data = append(RequestDelay999LineDataSeries[i].Data, opts.LineData{Value: s.Dur999Millis})
-					RequestDelayStdDevLineDataSeries[i].Data = append(RequestDelayStdDevLineDataSeries[i].Data, opts.LineData{Value: s.StdDev})
-					if s.FirstByte != nil {
-						RequestTTFB999LineDataSeries[i].Data = append(RequestTTFB999LineDataSeries[i].Data, opts.LineData{Value: s.FirstByte.P999Millis})
-						NErrors += s.FirstByte.OverSecond
+					for k, _ := range keyRange {
+						if k == s.Key() {
+							RequestDelayAvgLineDataSeries[i].Data = append(RequestDelayAvgLineDataSeries[i].Data, opts.LineData{Value: s.DurAvgMillis})
+							RequestDelay90LineDataSeries[i].Data = append(RequestDelay90LineDataSeries[i].Data, opts.LineData{Value: s.Dur90Millis})
+							RequestDelay99LineDataSeries[i].Data = append(RequestDelay99LineDataSeries[i].Data, opts.LineData{Value: s.Dur99Millis})
+							RequestDelay999LineDataSeries[i].Data = append(RequestDelay999LineDataSeries[i].Data, opts.LineData{Value: s.Dur999Millis})
+							RequestDelayStdDevLineDataSeries[i].Data = append(RequestDelayStdDevLineDataSeries[i].Data, opts.LineData{Value: s.StdDev})
+							if s.FirstByte != nil {
+								RequestTTFB999LineDataSeries[i].Data = append(RequestTTFB999LineDataSeries[i].Data, opts.LineData{Value: s.FirstByte.P999Millis})
+								NErrors += s.FirstByte.OverSecond
+							}
+							ThroughputAvgLineDataSeries[i].Data = append(ThroughputAvgLineDataSeries[i].Data, opts.LineData{Value: s.BpsAverage / (1 << 20)})
+							RequestRangeLineDataSeries[i].Data = append(RequestRangeLineDataSeries[i].Data, opts.LineData{Value: s.Requests})
+						} else {
+							RequestDelayAvgLineDataSeries[i].Data = append(RequestDelayAvgLineDataSeries[i].Data, opts.LineData{Value: 0})
+							RequestDelay90LineDataSeries[i].Data = append(RequestDelay90LineDataSeries[i].Data, opts.LineData{Value: 0})
+							RequestDelay99LineDataSeries[i].Data = append(RequestDelay99LineDataSeries[i].Data, opts.LineData{Value: 0})
+							RequestDelay999LineDataSeries[i].Data = append(RequestDelay999LineDataSeries[i].Data, opts.LineData{Value: 0})
+							RequestDelayStdDevLineDataSeries[i].Data = append(RequestDelayStdDevLineDataSeries[i].Data, opts.LineData{Value: 0})
+							if s.FirstByte != nil {
+								RequestTTFB999LineDataSeries[i].Data = append(RequestTTFB999LineDataSeries[i].Data, opts.LineData{Value: 0})
+								NErrors += s.FirstByte.OverSecond
+							}
+							ThroughputAvgLineDataSeries[i].Data = append(ThroughputAvgLineDataSeries[i].Data, opts.LineData{Value: 0})
+							RequestRangeLineDataSeries[i].Data = append(RequestRangeLineDataSeries[i].Data, opts.LineData{Value: 0})
+						}
 					}
-					ThroughputAvgLineDataSeries[i].Data = append(ThroughputAvgLineDataSeries[i].Data, opts.LineData{Value: s.BpsAverage / (1 << 20)})
-					RequestRangeLineDataSeries[i].Data = append(RequestRangeLineDataSeries[i].Data, opts.LineData{Value: s.Requests})
 				}
 				RequestSuccessLineDataSeries[0].Data = append(RequestSuccessLineDataSeries[0].Data, opts.LineData{Value: o.N})
 				RequestSuccessLineDataSeries[1].Data = append(RequestSuccessLineDataSeries[1].Data, opts.LineData{Value: o.N - NErrors})
