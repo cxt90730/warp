@@ -355,7 +355,7 @@ func DrawLineCharts(aggrs []aggregate.Aggregated) []*charts.Line {
 	var RequestTotalLineDataSeries []LineDataSeries
 	var RequestRangeLineDataSeries []LineDataSeries
 
-	var keyRange = make(map[string]struct{})
+	var keyRange = make(map[int]string)
 
 	if len(aggrs) == 0 {
 		fmt.Println("No data to analysis1")
@@ -389,24 +389,22 @@ func DrawLineCharts(aggrs []aggregate.Aggregated) []*charts.Line {
 			for j := range aggrs[i].Operations {
 				if aggrs[i].Operations[j].MultiSizedRequests != nil {
 					for k := range aggrs[i].Operations[j].MultiSizedRequests.BySize {
-						if aggrs[i].Operations[j].MultiSizedRequests.BySize[k].FirstByte != nil {
-							keyRange[aggrs[i].Operations[j].MultiSizedRequests.BySize[k].Key()] = struct{}{}
-						}
+						keyRange[aggrs[i].Operations[j].MultiSizedRequests.BySize[k].MinSize] = aggrs[i].Operations[j].MultiSizedRequests.BySize[k].KeyString()
 					}
 				}
 			}
 		}
 
 		fmt.Println("len MultiSizedRequests by size", len(keyRange))
-		for k, _ := range keyRange {
-			RequestDelayAvgLineDataSeries = append(RequestDelayAvgLineDataSeries, LineDataSeries{Name: k})
-			RequestDelay90LineDataSeries = append(RequestDelay90LineDataSeries, LineDataSeries{Name: k})
-			RequestDelay99LineDataSeries = append(RequestDelay99LineDataSeries, LineDataSeries{Name: k})
-			RequestDelay999LineDataSeries = append(RequestDelay999LineDataSeries, LineDataSeries{Name: k})
-			RequestDelayStdDevLineDataSeries = append(RequestDelayStdDevLineDataSeries, LineDataSeries{Name: k})
-			RequestTTFB999LineDataSeries = append(RequestTTFB999LineDataSeries, LineDataSeries{Name: k})
-			ThroughputAvgLineDataSeries = append(ThroughputAvgLineDataSeries, LineDataSeries{Name: k})
-			RequestRangeLineDataSeries = append(RequestRangeLineDataSeries, LineDataSeries{Name: k})
+		for _, v := range keyRange {
+			RequestDelayAvgLineDataSeries = append(RequestDelayAvgLineDataSeries, LineDataSeries{Name: v})
+			RequestDelay90LineDataSeries = append(RequestDelay90LineDataSeries, LineDataSeries{Name: v})
+			RequestDelay99LineDataSeries = append(RequestDelay99LineDataSeries, LineDataSeries{Name: v})
+			RequestDelay999LineDataSeries = append(RequestDelay999LineDataSeries, LineDataSeries{Name: v})
+			RequestDelayStdDevLineDataSeries = append(RequestDelayStdDevLineDataSeries, LineDataSeries{Name: v})
+			RequestTTFB999LineDataSeries = append(RequestTTFB999LineDataSeries, LineDataSeries{Name: v})
+			ThroughputAvgLineDataSeries = append(ThroughputAvgLineDataSeries, LineDataSeries{Name: v})
+			RequestRangeLineDataSeries = append(RequestRangeLineDataSeries, LineDataSeries{Name: v})
 		}
 		RequestSuccessLineDataSeries = append(RequestSuccessLineDataSeries,
 			LineDataSeries{Name: "requests_completed"}, LineDataSeries{Name: "requests_success"}, LineDataSeries{Name: "requests_failed"})
@@ -414,6 +412,11 @@ func DrawLineCharts(aggrs []aggregate.Aggregated) []*charts.Line {
 		RequestTotalLineDataSeries = append(RequestTotalLineDataSeries, LineDataSeries{Name: "ops total"})
 		ThroughputTotalLineDataSeries = append(ThroughputTotalLineDataSeries, LineDataSeries{Name: "throughput total(MiB/s)"})
 	}
+	keys := make([]int, 0, len(keyRange))
+	for key := range keyRange {
+		keys = append(keys, key)
+	}
+	sort.Ints(keys)
 	for _, aggr := range aggrs {
 		for _, o := range aggr.Operations {
 			if o.SingleSizedRequests != nil {
@@ -444,9 +447,12 @@ func DrawLineCharts(aggrs []aggregate.Aggregated) []*charts.Line {
 				}
 				reqs := *o.MultiSizedRequests
 				var NErrors = o.Errors
-				for i, s := range reqs.BySize {
-					for k, _ := range keyRange {
-						if k == s.Key() {
+				for i, k := range keys {
+					matched := false
+					for _, s := range reqs.BySize {
+						if s.KeyString() == keyRange[k] {
+							matched = true
+							fmt.Println("matched", s.KeyString(), k)
 							RequestDelayAvgLineDataSeries[i].Data = append(RequestDelayAvgLineDataSeries[i].Data, opts.LineData{Value: s.DurAvgMillis})
 							RequestDelay90LineDataSeries[i].Data = append(RequestDelay90LineDataSeries[i].Data, opts.LineData{Value: s.Dur90Millis})
 							RequestDelay99LineDataSeries[i].Data = append(RequestDelay99LineDataSeries[i].Data, opts.LineData{Value: s.Dur99Millis})
@@ -458,19 +464,19 @@ func DrawLineCharts(aggrs []aggregate.Aggregated) []*charts.Line {
 							}
 							ThroughputAvgLineDataSeries[i].Data = append(ThroughputAvgLineDataSeries[i].Data, opts.LineData{Value: s.BpsAverage / (1 << 20)})
 							RequestRangeLineDataSeries[i].Data = append(RequestRangeLineDataSeries[i].Data, opts.LineData{Value: s.Requests})
-						} else {
-							RequestDelayAvgLineDataSeries[i].Data = append(RequestDelayAvgLineDataSeries[i].Data, opts.LineData{Value: 0})
-							RequestDelay90LineDataSeries[i].Data = append(RequestDelay90LineDataSeries[i].Data, opts.LineData{Value: 0})
-							RequestDelay99LineDataSeries[i].Data = append(RequestDelay99LineDataSeries[i].Data, opts.LineData{Value: 0})
-							RequestDelay999LineDataSeries[i].Data = append(RequestDelay999LineDataSeries[i].Data, opts.LineData{Value: 0})
-							RequestDelayStdDevLineDataSeries[i].Data = append(RequestDelayStdDevLineDataSeries[i].Data, opts.LineData{Value: 0})
-							if s.FirstByte != nil {
-								RequestTTFB999LineDataSeries[i].Data = append(RequestTTFB999LineDataSeries[i].Data, opts.LineData{Value: 0})
-								NErrors += s.FirstByte.OverSecond
-							}
-							ThroughputAvgLineDataSeries[i].Data = append(ThroughputAvgLineDataSeries[i].Data, opts.LineData{Value: 0})
-							RequestRangeLineDataSeries[i].Data = append(RequestRangeLineDataSeries[i].Data, opts.LineData{Value: 0})
+							break
 						}
+					}
+					if !matched {
+						fmt.Println("not matched", k)
+						RequestDelayAvgLineDataSeries[i].Data = append(RequestDelayAvgLineDataSeries[i].Data, opts.LineData{Value: 0})
+						RequestDelay90LineDataSeries[i].Data = append(RequestDelay90LineDataSeries[i].Data, opts.LineData{Value: 0})
+						RequestDelay99LineDataSeries[i].Data = append(RequestDelay99LineDataSeries[i].Data, opts.LineData{Value: 0})
+						RequestDelay999LineDataSeries[i].Data = append(RequestDelay999LineDataSeries[i].Data, opts.LineData{Value: 0})
+						RequestTTFB999LineDataSeries[i].Data = append(RequestTTFB999LineDataSeries[i].Data, opts.LineData{Value: 0})
+						RequestDelayStdDevLineDataSeries[i].Data = append(RequestDelayStdDevLineDataSeries[i].Data, opts.LineData{Value: 0})
+						ThroughputAvgLineDataSeries[i].Data = append(ThroughputAvgLineDataSeries[i].Data, opts.LineData{Value: 0})
+						RequestRangeLineDataSeries[i].Data = append(RequestRangeLineDataSeries[i].Data, opts.LineData{Value: 0})
 					}
 				}
 				RequestSuccessLineDataSeries[0].Data = append(RequestSuccessLineDataSeries[0].Data, opts.LineData{Value: o.N})
@@ -483,6 +489,7 @@ func DrawLineCharts(aggrs []aggregate.Aggregated) []*charts.Line {
 			}
 
 		}
+
 	}
 
 	lines = append(lines, drawLineChart("Requests Avg", "Requests Avg(ms)", RequestDelayAvgLineDataSeries))

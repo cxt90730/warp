@@ -162,8 +162,12 @@ type RequestSizeRange struct {
 	DurAvgMillis int `json:"dur_avg_millis"`
 }
 
-func (r *RequestSizeRange) Key() string {
-	return fmt.Sprintf("%d-%d", r.MinSize, r.MaxSize)
+func (r *RequestSizeRange) KeyString() string {
+	return fmt.Sprintf("%s-%s", r.MinSizeString, r.MaxSizeString)
+}
+
+func (r *RequestSizeRange) MinKey() string {
+	return fmt.Sprintf("%d", r.MinSize)
 }
 
 func (r *RequestSizeRange) fill(s bench.SizeSegment) {
