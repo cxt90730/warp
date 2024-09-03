@@ -18,6 +18,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -206,38 +207,43 @@ func runServerBenchmark(ctx *cli.Context, b bench.Benchmark) (bool, error) {
 	prof.stop(context.Background(), ctx, fileName+".profiles.zip")
 
 	infoLn("Done. Downloading operations...")
-	downloaded := conns.downloadOps()
-	switch len(downloaded) {
-	case 0:
-	case 1:
-		allOps = downloaded[0]
-	default:
-		threads := uint16(0)
-		for _, ops := range downloaded {
-			threads = ops.OffsetThreads(threads)
-			allOps = append(allOps, ops...)
-		}
+	downloadStream := conns.downloadOps()
+	f, err := os.Create(fileName + ".csv.zst")
+	if err != nil {
+		errorLn("Unable to write benchmark data:", err)
+		return false, err
+	}
+	defer f.Close()
+
+	enc, err := zstd.NewWriter(f, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+	fatalIf(probe.NewError(err), "Unable to compress benchmark output")
+	defer enc.Close()
+
+	bw := bufio.NewWriter(enc)
+	_, err = bw.WriteString("idx\tthread\top\tclient_id\tn_objects\tbytes\tendpoint\tfile\terror\tstart\tfirst_byte\tend\tduration_ns\n")
+	if err != nil {
+		return false, err
 	}
 
-	if len(allOps) > 0 {
-		allOps.SortByStartTime()
-		f, err := os.Create(fileName + ".csv.zst")
+	var i int
+	for op := range downloadStream {
+		var ttfb string
+		if op.FirstByte != nil {
+			ttfb = op.FirstByte.Format(time.RFC3339Nano)
+		}
+		_, err := fmt.Fprintf(bw, "%d\t%d\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
+			i, op.Thread, op.OpType, op.ClientID, op.ObjPerOp, op.Size,
+			csvEscapeString(op.Endpoint), op.File, csvEscapeString(op.Err),
+			op.Start.Format(time.RFC3339Nano), ttfb, op.End.Format(time.RFC3339Nano),
+			op.End.Sub(op.Start)/time.Nanosecond)
 		if err != nil {
-			errorLn("Unable to write benchmark data:", err)
-		} else {
-			func() {
-				defer f.Close()
-				enc, err := zstd.NewWriter(f, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
-				fatalIf(probe.NewError(err), "Unable to compress benchmark output")
-
-				defer enc.Close()
-				err = allOps.CSV(enc, commandLine(ctx))
-				fatalIf(probe.NewError(err), "Unable to write benchmark output")
-
-				infoLn(fmt.Sprintf("Benchmark data written to %q\n", fileName+".csv.zst"))
-			}()
+			return false, err
 		}
+		i++
 	}
+	bw.Flush()
+	infoLn(fmt.Sprintf("Benchmark data written to %q\n", fileName+".csv.zst"))
+
 	monitor.OperationsReady(allOps, fileName, commandLine(ctx))
 	printAnalysis(ctx, allOps)
 
@@ -452,36 +458,64 @@ func (c *connections) startStageAll(stage benchmarkStage, startAt time.Time, fai
 
 // downloadOps will download operations from all connected clients.
 // If an error is encountered the result will be ignored.
-func (c *connections) downloadOps() []bench.Operations {
-	var wg sync.WaitGroup
-	var mu sync.Mutex
+func (c *connections) downloadOps() chan bench.Operation {
 	c.info("Downloading operations...")
-	res := make([]bench.Operations, 0, len(c.ws))
+	res := make(chan bench.Operation, 10000)
+	wg := sync.WaitGroup{}
 	for i, conn := range c.ws {
 		if conn == nil {
 			continue
 		}
 		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			resp, err := c.roundTrip(i, serverRequest{Operation: serverReqSendOps})
-			if err != nil {
-				c.errorF("Client %v download returned error: %v\n", c.hostName(i), resp.Err)
-				return
-			}
-			if resp.Err != "" {
-				c.errorF("Client %v returned error: %v\n", c.hostName(i), resp.Err)
-				return
-			}
-			c.info("Client ", c.hostName(i), ": Operations downloaded.")
-
-			mu.Lock()
-			res = append(res, resp.Ops)
-			mu.Unlock()
-		}(i)
+		go c.iDownloadOps(i, res, &wg)
 	}
-	wg.Wait()
+	go func() {
+		wg.Wait()
+		close(res)
+	}()
 	return res
+}
+
+func (c *connections) iDownloadOps(i int,
+	opsChan chan bench.Operation, wg *sync.WaitGroup) {
+
+	defer wg.Done()
+
+	req := serverRequest{
+		Operation: serverReqSendOps,
+		ClientIdx: i,
+	}
+	if c.ws[i] == nil {
+		err := c.connect(i)
+		if err != nil {
+			c.errorF("connect %s failed:%v\n", c.hostName(i), err)
+			return
+		}
+	}
+	conn := c.ws[i]
+	err := conn.WriteJSON(req)
+	if err != nil {
+		c.errorF("write json failed:%v\n", err)
+		return
+	}
+	for {
+		conn := c.ws[i]
+		var resp clientReply
+		err = conn.ReadJSON(&resp)
+		if err != nil {
+			c.errorF("read json failed:%v\n", err)
+			if err := c.connect(i); err == nil {
+				continue
+			}
+			return
+		}
+		for _, op := range resp.Ops {
+			opsChan <- op
+		}
+		if resp.Type == clientRespOpsEnd {
+			return
+		}
+	}
 }
 
 // waitForStage will wait for stage completion on all clients.

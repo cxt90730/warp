@@ -30,7 +30,6 @@ import (
 	"time"
 
 	"github.com/cheggaaa/pb"
-	"github.com/klauspost/compress/zstd"
 	"github.com/minio/cli"
 	"github.com/minio/madmin-go/v3"
 	"github.com/minio/mc/pkg/probe"
@@ -241,32 +240,15 @@ func runBench(ctx *cli.Context, b bench.Benchmark) error {
 	<-pgDone
 
 	// Previous context is canceled, create a new...
-	monitor.InfoLn("Saving benchmark data...")
 	ctx2 = context.Background()
-	ops.SortByStartTime()
-	ops.SetClientID(cID)
 	prof.stop(ctx2, ctx, fileName+".profiles.zip")
 
-	if len(ops) > 0 {
-		f, err := os.Create(fileName + ".csv.zst")
-		if err != nil {
-			monitor.Errorln("Unable to write benchmark data:", err)
-		} else {
-			func() {
-				defer f.Close()
-				enc, err := zstd.NewWriter(f, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
-				fatalIf(probe.NewError(err), "Unable to compress benchmark output")
-
-				defer enc.Close()
-				err = ops.CSV(enc, commandLine(ctx))
-				fatalIf(probe.NewError(err), "Unable to write benchmark output")
-
-				monitor.InfoLn(fmt.Sprintf("Benchmark data written to %q\n", fileName+".csv.zst"))
-			}()
-		}
+	allOps := make([]bench.Operation, 0, 100000)
+	for op := range ops {
+		allOps = append(allOps, op)
 	}
-	monitor.OperationsReady(ops, fileName, commandLine(ctx))
-	printAnalysis(ctx, ops)
+	monitor.OperationsReady(allOps, fileName, commandLine(ctx))
+	printAnalysis(ctx, allOps)
 	if !ctx.Bool("keep-data") && !ctx.Bool("noclear") {
 		monitor.InfoLn("Starting cleanup...")
 		b.Cleanup(context.Background())
@@ -286,7 +268,7 @@ type clientBenchmark struct {
 	cancel    context.CancelFunc
 	info      map[benchmarkStage]stageInfo
 	stage     benchmarkStage
-	results   bench.Operations
+	results   chan bench.Operation
 	clientIdx int
 	sync.Mutex
 }
@@ -424,27 +406,6 @@ func runClientBenchmark(ctx *cli.Context, b bench.Benchmark, cb *clientBenchmark
 	cb.stageDone(stageBenchmark, err, common.Custom)
 	if err != nil {
 		return err
-	}
-	ops.SetClientID(cID)
-	ops.SortByStartTime()
-
-	if len(ops) > 0 {
-		f, err := os.Create(fileName + ".csv.zst")
-		if err != nil {
-			console.Error("Unable to write benchmark data:", err)
-		} else {
-			func() {
-				defer f.Close()
-				enc, err := zstd.NewWriter(f, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
-				fatalIf(probe.NewError(err), "Unable to compress benchmark output")
-
-				defer enc.Close()
-				err = ops.CSV(enc, commandLine(ctx))
-				fatalIf(probe.NewError(err), "Unable to write benchmark output")
-
-				console.Infof("Benchmark data written to %q\n", fileName+".csv.zst")
-			}()
-		}
 	}
 
 	err = cb.waitForStage(stageCleanup)

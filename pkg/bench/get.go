@@ -242,7 +242,7 @@ func (f *firstByteRecorder) Read(p []byte) (n int, err error) {
 
 // Start will execute the main benchmark.
 // Operations should begin executing when the start channel is closed.
-func (g *Get) Start(ctx context.Context, wait chan struct{}) (Operations, error) {
+func (g *Get) Start(ctx context.Context, wait chan struct{}) (chan Operation, error) {
 	var wg sync.WaitGroup
 	wg.Add(g.Concurrency)
 	c := g.Collector

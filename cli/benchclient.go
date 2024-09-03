@@ -39,6 +39,7 @@ const (
 	clientRespBenchmarkStarted clientReplyType = "benchmark_started"
 	clientRespStatus           clientReplyType = "benchmark_status"
 	clientRespOps              clientReplyType = "ops"
+	clientRespOpsEnd           clientReplyType = "ops_end"
 )
 
 // clientReply contains the response to a server request.
@@ -278,10 +279,28 @@ func serveWs(w http.ResponseWriter, r *http.Request) {
 				resp.Err = "no benchmark running"
 				break
 			}
-			resp.Type = clientRespOps
 			ab.Lock()
-			resp.Ops = ab.results
+			opsChannel := ab.results
 			ab.Unlock()
+
+			ops := make([]bench.Operation, 0, 10000)
+			for op := range opsChannel {
+				ops = append(ops, op)
+				if len(ops) >= 10000 {
+					resp.Type = clientRespOps
+					resp.Ops = ops
+					resp.Time = time.Now()
+					err = ws.WriteJSON(resp)
+					if err != nil {
+						console.Error("Writing response:", err)
+						return
+					}
+					clear(ops)
+					ops = ops[:0]
+				}
+			}
+			resp.Type = clientRespOpsEnd
+			resp.Ops = ops
 		default:
 			resp.Err = "unknown command"
 		}

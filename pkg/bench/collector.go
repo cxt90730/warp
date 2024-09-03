@@ -18,28 +18,62 @@
 package bench
 
 import (
+	"bufio"
 	"context"
-	"math"
+	"encoding/csv"
+	"fmt"
+	"io"
+	"os"
+	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/minio/pkg/v2/console"
 )
 
 type Collector struct {
 	rcv   chan Operation
-	ops   Operations
 	rcvWg sync.WaitGroup
 	extra []chan<- Operation
 	// The mutex protects the ops above.
 	// Once ops have been added, they should no longer be modified.
 	opsMu sync.Mutex
+
+	clientID     string
+	fileName     string
+	file         *os.File
+	zstdEncoder  *zstd.Encoder
+	bufferWriter *bufio.Writer
+	opIndex      atomic.Int64
 }
 
-func NewCollector() *Collector {
+func NewCollector(clientID, fileName string) *Collector {
+	fileName = fileName + ".csv.zst"
+	f, err := os.Create(fileName)
+	if err != nil {
+		console.Fatal("Unable to write benchmark data:", err)
+	}
+	enc, err := zstd.NewWriter(f, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+	if err != nil {
+		console.Fatal("Unable to create zstd encoder: %v", err)
+	}
+
+	bw := bufio.NewWriter(enc)
+	_, err = bw.WriteString("idx\tthread\top\tclient_id\tn_objects\tbytes\tendpoint\tfile\terror\tstart\tfirst_byte\tend\tduration_ns\n")
+	if err != nil {
+		console.Fatal("Unable to write csv header:", err)
+	}
+
 	r := &Collector{
-		ops: make(Operations, 0, 10000),
-		rcv: make(chan Operation, 1000),
+		rcv: make(chan Operation, 10000),
+
+		clientID:     clientID,
+		fileName:     fileName,
+		file:         f,
+		zstdEncoder:  enc,
+		bufferWriter: bw,
 	}
 	r.rcvWg.Add(1)
 	go func() {
@@ -49,18 +83,34 @@ func NewCollector() *Collector {
 				ch <- op
 			}
 			r.opsMu.Lock()
-			r.ops = append(r.ops, op)
+			err := r.writeOp(op)
+			if err != nil {
+				console.Fatal("Unable to write operation:", err)
+			}
 			r.opsMu.Unlock()
 		}
 	}()
 	return r
 }
 
+func (c *Collector) writeOp(op Operation) error {
+	var ttfb string
+	if op.FirstByte != nil {
+		ttfb = op.FirstByte.Format(time.RFC3339Nano)
+	}
+	_, err := fmt.Fprintf(c.bufferWriter,
+		"%d\t%d\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
+		c.opIndex.Add(1)-1, op.Thread, op.OpType, c.clientID, op.ObjPerOp, op.Size, csvEscapeString(op.Endpoint), op.File, csvEscapeString(op.Err), op.Start.Format(time.RFC3339Nano), ttfb, op.End.Format(time.RFC3339Nano), op.End.Sub(op.Start)/time.Nanosecond)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
 // NewNullCollector collects operations, but discards them.
 func NewNullCollector() *Collector {
 	r := &Collector{
-		ops: make(Operations, 0),
-		rcv: make(chan Operation, 1000),
+		rcv: make(chan Operation, 10000),
 	}
 	r.rcvWg.Add(1)
 	go func() {
@@ -79,86 +129,130 @@ func NewNullCollector() *Collector {
 // The minimum duration for the calculation can be set as well.
 // Segment splitting may cause less than this duration to be used.
 func (c *Collector) AutoTerm(ctx context.Context, op string, threshold float64, wantSamples, splitInto int, minDur time.Duration) context.Context {
-	if wantSamples >= splitInto {
-		panic("wantSamples >= splitInto")
-	}
-	if splitInto == 0 {
-		panic("splitInto == 0 ")
-	}
-	ctx, cancel := context.WithCancel(ctx)
-	go func() {
-		defer cancel()
-		ticker := time.NewTicker(time.Second)
-
-	checkloop:
-		for {
-			select {
-			case <-ctx.Done():
-				ticker.Stop()
-				return
-			case <-ticker.C:
-			}
-			// Time to check if we should terminate.
-			c.opsMu.Lock()
-			// copies
-			ops := c.ops.FilterByOp(op)
-			c.opsMu.Unlock()
-			start, end := ops.ActiveTimeRange(true)
-			if end.Sub(start) <= minDur*time.Duration(splitInto)/time.Duration(wantSamples) {
-				// We don't have enough.
-				continue
-			}
-			segs := ops.Segment(SegmentOptions{
-				From:           start,
-				PerSegDuration: end.Sub(start) / time.Duration(splitInto),
-				AllThreads:     true,
-			})
-			if len(segs) < wantSamples {
-				continue
-			}
-			// Use last segment as our base.
-			mb, _, objs := segs[len(segs)-1].SpeedPerSec()
-			// Only use the segments we are interested in.
-			segs = segs[len(segs)-wantSamples : len(segs)-1]
-			for _, seg := range segs {
-				segMB, _, segObjs := seg.SpeedPerSec()
-				if mb > 0 {
-					if math.Abs(mb-segMB) > threshold*mb {
-						continue checkloop
-					}
-					continue
-				}
-				if math.Abs(objs-segObjs) > threshold*objs {
-					continue checkloop
-				}
-			}
-			// All checks passed.
-			if mb > 0 {
-				console.Eraseline()
-				console.Printf("\rThroughput %0.01fMiB/s within %f%% for %v. Assuming stability. Terminating benchmark.\n",
-					mb, threshold*100,
-					segs[0].Duration().Round(time.Millisecond)*time.Duration(len(segs)+1))
-			} else {
-				console.Eraseline()
-				console.Printf("\rThroughput %0.01f objects/s within %f%% for %v. Assuming stability. Terminating benchmark.\n",
-					objs, threshold*100,
-					segs[0].Duration().Round(time.Millisecond)*time.Duration(len(segs)+1))
-			}
-			return
-		}
-	}()
-	return ctx
+	return context.Background()
 }
 
 func (c *Collector) Receiver() chan<- Operation {
 	return c.rcv
 }
 
-func (c *Collector) Close() Operations {
+func (c *Collector) Close() chan Operation {
 	close(c.rcv)
 	c.rcvWg.Wait()
 	for _, ch := range c.extra {
 		close(ch)
 	}
-	return c.ops
+	if c.file != nil {
+		c.bufferWriter.Flush()
+		c.zstdEncoder.Close()
+		c.file.Close()
+	}
+	ops := make(chan Operation, 10000)
+	go sendFile(c.fileName, ops)
+	return ops
+}
+
+func sendFile(fileName string, ops chan<- Operation) {
+	defer close(ops)
+
+	f, err := os.Open(fileName)
+	if err != nil {
+		console.Fatalf("Unable to open %s: %v", fileName, err)
+	}
+	defer f.Close()
+
+	decoder, err := zstd.NewReader(f)
+	if err != nil {
+		console.Fatalf("Unable to create zstd decoder: %v", err)
+	}
+	defer decoder.Close()
+
+	csvReader := csv.NewReader(decoder)
+	csvReader.Comma = '\t'
+	csvReader.ReuseRecord = true
+	csvReader.Comment = '#'
+	header, err := csvReader.Read()
+	if err != nil {
+		console.Fatalf("Unable to read header: %v", err)
+	}
+	fieldIdx := make(map[string]int)
+	for i, s := range header {
+		fieldIdx[s] = i
+	}
+
+	for {
+		values, err := csvReader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			console.Fatalf("Unable to read line: %v", err)
+		}
+		if len(values) == 0 {
+			continue
+		}
+
+		opErr := values[fieldIdx["error"]]
+		if opErr != "" {
+			fmt.Fprintf(os.Stdout, "Skipping operation with error: %s\n", opErr)
+			continue
+		}
+
+		start, err := time.Parse(time.RFC3339Nano, values[fieldIdx["start"]])
+		if err != nil {
+			console.Fatalf("Unable to parse start time: %v", err)
+		}
+		var ttfb *time.Time
+		if fb := values[fieldIdx["first_byte"]]; fb != "" {
+			t, err := time.Parse(time.RFC3339Nano, fb)
+			if err != nil {
+				console.Fatalf("Unable to parse first byte time: %v", err)
+			}
+			ttfb = &t
+		}
+		end, err := time.Parse(time.RFC3339Nano, values[fieldIdx["end"]])
+		if err != nil {
+			console.Fatalf("Unable to parse end time: %v", err)
+		}
+		size, err := strconv.ParseInt(values[fieldIdx["bytes"]], 10, 64)
+		if err != nil {
+			console.Fatalf("Unable to parse size: %v", err)
+		}
+		thread, err := strconv.ParseUint(values[fieldIdx["thread"]], 10, 16)
+		if err != nil {
+			console.Fatalf("Unable to parse thread: %v", err)
+		}
+		objs, err := strconv.ParseInt(values[fieldIdx["n_objects"]], 10, 64)
+		if objs != 1 {
+			fmt.Fprintf(os.Stdout,
+				"Skipping operation with multiple objects: %s\n", values[fieldIdx["op"]])
+			continue
+		}
+		if err != nil {
+			console.Fatalf("Unable to parse objects: %v", err)
+		}
+		var endpoint, clientID string
+		if idx, ok := fieldIdx["endpoint"]; ok {
+			endpoint = values[idx]
+		}
+		if idx, ok := fieldIdx["client_id"]; ok {
+			clientID = values[idx]
+		}
+		file := values[fieldIdx["file"]]
+
+		op := Operation{
+			OpType:    values[fieldIdx["op"]],
+			ObjPerOp:  int(objs),
+			Start:     start,
+			FirstByte: ttfb,
+			End:       end,
+			Size:      size,
+			File:      file,
+			Thread:    uint16(thread),
+			Endpoint:  endpoint,
+			ClientID:  clientID,
+		}
+
+		ops <- op
+	}
 }

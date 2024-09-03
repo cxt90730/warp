@@ -88,7 +88,7 @@ func (d *Delete) Prepare(ctx context.Context) error {
 			return (fmt.Errorf("no objects found for bucket %s", d.Bucket))
 		}
 		done()
-		d.Collector = NewCollector()
+		d.addCollector()
 
 		// Shuffle objects.
 		// Benchmark will pick from slice in order.
@@ -191,7 +191,8 @@ func (d *Delete) Prepare(ctx context.Context) error {
 
 // Start will execute the main benchmark.
 // Operations should begin executing when the start channel is closed.
-func (d *Delete) Start(ctx context.Context, wait chan struct{}) (Operations, error) {
+func (d *Delete) Start(ctx context.Context, wait chan struct{}) (chan Operation, error) {
+
 	var wg sync.WaitGroup
 	wg.Add(d.Concurrency)
 	c := d.Collector

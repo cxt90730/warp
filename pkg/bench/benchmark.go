@@ -38,7 +38,7 @@ type Benchmark interface {
 
 	// Start will execute the main benchmark.
 	// Operations should begin executing when the start channel is closed.
-	Start(ctx context.Context, wait chan struct{}) (Operations, error)
+	Start(ctx context.Context, wait chan struct{}) (chan Operation, error)
 
 	// Clean up after the benchmark run.
 	Cleanup(ctx context.Context)
@@ -67,7 +67,9 @@ type Common struct {
 
 	Client func() (cl *minio.Client, done func())
 
-	Collector *Collector
+	ClientID        string // "cid"
+	CollectFileName string // without extension(.csv.zst)
+	Collector       *Collector
 
 	Location string
 	Bucket   string
@@ -251,7 +253,7 @@ func (c *Common) addCollector() {
 	if c.DiscardOutput {
 		c.Collector = NewNullCollector()
 	} else {
-		c.Collector = NewCollector()
+		c.Collector = NewCollector(c.ClientID, c.CollectFileName)
 	}
 	c.Collector.extra = c.ExtraOut
 }

@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/minio/cli"
 	"github.com/minio/mc/pkg/probe"
@@ -283,15 +284,24 @@ func getCommon(ctx *cli.Context, src func() generator.Source) bench.Common {
 		rpsLimiter = rate.NewLimiter(rate.Limit(rpsLimit), 1)
 	}
 
+	fileName := ctx.String("benchdata")
+	cID := pRandASCII(6)
+	if fileName == "" {
+		fileName = fmt.Sprintf("%s-%s-%s-%s", appName,
+			ctx.Command.Name, time.Now().Format("2006-01-02[150405]"), cID)
+	}
+
 	return bench.Common{
-		Client:        newClient(ctx),
-		Concurrency:   ctx.Int("concurrent"),
-		Source:        src,
-		Bucket:        ctx.String("bucket"),
-		Location:      ctx.String("region"),
-		PutOpts:       putOpts(ctx),
-		DiscardOutput: ctx.Bool("stress"),
-		ExtraOut:      extra,
-		RpsLimiter:    rpsLimiter,
+		Client:          newClient(ctx),
+		Concurrency:     ctx.Int("concurrent"),
+		Source:          src,
+		Bucket:          ctx.String("bucket"),
+		Location:        ctx.String("region"),
+		PutOpts:         putOpts(ctx),
+		DiscardOutput:   ctx.Bool("stress"),
+		ExtraOut:        extra,
+		RpsLimiter:      rpsLimiter,
+		ClientID:        cID,
+		CollectFileName: fileName,
 	}
 }

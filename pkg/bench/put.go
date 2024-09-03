@@ -38,7 +38,7 @@ func (u *Put) Prepare(ctx context.Context) error {
 
 // Start will execute the main benchmark.
 // Operations should begin executing when the start channel is closed.
-func (u *Put) Start(ctx context.Context, wait chan struct{}) (Operations, error) {
+func (u *Put) Start(ctx context.Context, wait chan struct{}) (chan Operation, error) {
 	var wg sync.WaitGroup
 	wg.Add(u.Concurrency)
 	u.addCollector()

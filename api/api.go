@@ -79,7 +79,7 @@ type Server struct {
 func (s *Server) OperationsReady(ops bench.Operations, filename, cmdLine string) {
 	s.mu.Lock()
 	s.status.DataReady = ops != nil
-	s.ops = ops
+	// s.ops = ops
 	s.status.Filename = filename
 	s.cmdLine = cmdLine
 	s.mu.Unlock()

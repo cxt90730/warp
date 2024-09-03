@@ -125,7 +125,7 @@ func (g *S3Zip) Prepare(ctx context.Context) error {
 
 // Start will execute the main benchmark.
 // Operations should begin executing when the start channel is closed.
-func (g *S3Zip) Start(ctx context.Context, wait chan struct{}) (Operations, error) {
+func (g *S3Zip) Start(ctx context.Context, wait chan struct{}) (chan Operation, error) {
 	var wg sync.WaitGroup
 	wg.Add(g.Concurrency)
 	c := g.Collector

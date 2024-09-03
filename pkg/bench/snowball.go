@@ -64,7 +64,7 @@ func (s *Snowball) Prepare(ctx context.Context) error {
 
 // Start will execute the main benchmark.
 // Operations should begin executing when the start channel is closed.
-func (s *Snowball) Start(ctx context.Context, wait chan struct{}) (Operations, error) {
+func (s *Snowball) Start(ctx context.Context, wait chan struct{}) (chan Operation, error) {
 	var wg sync.WaitGroup
 	wg.Add(s.Concurrency)
 	c := s.Collector
